@@ -27,7 +27,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-var genJWKGroup singleflight.Group
+var jwkGenFlightGroup singleflight.Group
 
 func EnsureAsymmetricKeypairExists(ctx context.Context, r InternalRegistry, alg, set string) error {
 	_, err := GetOrGenerateKeys(ctx, r, r.KeyManager(), set, set, alg)
@@ -47,10 +47,9 @@ func GetOrGenerateKeys(ctx context.Context, r InternalRegistry, m Manager, set, 
 		}
 	}
 
-	r.Logger().WithField("jwks", set).Warnf("JSON Web Key not found in JSON Web Key Set %s, generating new key pair...", set)
-
-	// Suppress duplicate keyset generation
-	keysResult, err, _ := genJWKGroup.Do(set+alg, func() (any, error) {
+	// Suppress duplicate key set generation jobs where the set+alg match.
+	keysResult, err, _ := jwkGenFlightGroup.Do(set+alg, func() (any, error) {
+		r.Logger().WithField("jwks", set).Warnf("JSON Web Key not found in JSON Web Key Set %s, generating new key pair...", set)
 		return m.GenerateAndPersistKeySet(ctx, set, kid, alg, "sig")
 	})
 	if err != nil {
