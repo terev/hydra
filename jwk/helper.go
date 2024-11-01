@@ -21,8 +21,6 @@ import (
 
 	"github.com/ory/x/errorsx"
 
-	"github.com/ory/hydra/v2/x"
-
 	jose "github.com/go-jose/go-jose/v3"
 	"github.com/pkg/errors"
 )
@@ -35,18 +33,23 @@ func EnsureAsymmetricKeypairExists(ctx context.Context, r InternalRegistry, alg,
 }
 
 func GetOrGenerateKeys(ctx context.Context, r InternalRegistry, m Manager, set, kid, alg string) (private *jose.JSONWebKey, err error) {
-	keys, err := m.GetKeySet(ctx, set)
-	if err != nil && !errors.Is(err, x.ErrNotFound) {
+	keySet, err := GetOrGenerateKeySet(ctx, r, m, set, kid, alg)
+	if err != nil {
 		return nil, err
 	}
 
-	if keys != nil && len(keys.Keys) > 0 {
-		privKey, privKeyErr := FindPrivateKey(keys)
-		if privKeyErr == nil {
-			return privKey, nil
-		}
+	privKey, err := FindPrivateKey(keySet)
+	if err != nil {
+		return nil, err
 	}
+	return privKey, nil
+}
 
+func GetOrGenerateKeySet(ctx context.Context, r InternalRegistry, m Manager, set, kid, alg string) (*jose.JSONWebKeySet, error) {
+	keys, err := m.GetKeySet(ctx, set)
+	if err == nil && (keys != nil && len(keys.Keys) > 0) {
+		return keys, nil
+	}
 	// Suppress duplicate key set generation jobs where the set+alg match.
 	keysResult, err, _ := jwkGenFlightGroup.Do(set+alg, func() (any, error) {
 		r.Logger().WithField("jwks", set).Warnf("JSON Web Key not found in JSON Web Key Set %s, generating new key pair...", set)
@@ -55,12 +58,7 @@ func GetOrGenerateKeys(ctx context.Context, r InternalRegistry, m Manager, set, 
 	if err != nil {
 		return nil, err
 	}
-
-	privKey, err := FindPrivateKey(keysResult.(*jose.JSONWebKeySet))
-	if err != nil {
-		return nil, err
-	}
-	return privKey, nil
+	return keysResult.(*jose.JSONWebKeySet), nil
 }
 
 func First(keys []jose.JSONWebKey) *jose.JSONWebKey {
