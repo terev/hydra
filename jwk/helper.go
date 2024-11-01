@@ -29,21 +29,27 @@ import (
 var jwkGenFlightGroup singleflight.Group
 
 func EnsureAsymmetricKeypairExists(ctx context.Context, r InternalRegistry, alg, set string) error {
-	_, err := GetOrGenerateKeys(ctx, r, r.KeyManager(), set, set, alg)
+	_, err := GetOrGenerateKeySetPrivateKey(ctx, r, r.KeyManager(), set, set, alg)
 	return err
 }
 
-func GetOrGenerateKeys(ctx context.Context, r InternalRegistry, m Manager, set, kid, alg string) (private *jose.JSONWebKey, err error) {
+func GetOrGenerateKeySetPrivateKey(ctx context.Context, r InternalRegistry, m Manager, set, kid, alg string) (private *jose.JSONWebKey, err error) {
 	keySet, err := GetOrGenerateKeySet(ctx, r, m, set, kid, alg)
 	if err != nil {
 		return nil, err
 	}
 
 	privKey, err := FindPrivateKey(keySet)
+	if err == nil {
+		return privKey, nil
+	}
+
+	keySet, err = generateKeySet(ctx, r, m, set, kid, alg)
 	if err != nil {
 		return nil, err
 	}
-	return privKey, nil
+
+	return FindPrivateKey(keySet)
 }
 
 func GetOrGenerateKeySet(ctx context.Context, r InternalRegistry, m Manager, set, kid, alg string) (*jose.JSONWebKeySet, error) {
@@ -54,6 +60,10 @@ func GetOrGenerateKeySet(ctx context.Context, r InternalRegistry, m Manager, set
 		return keys, nil
 	}
 
+	return generateKeySet(ctx, r, m, set, kid, alg)
+}
+
+func generateKeySet(ctx context.Context, r InternalRegistry, m Manager, set, kid, alg string) (*jose.JSONWebKeySet, error) {
 	// Suppress duplicate key set generation jobs where the set+alg match.
 	keysResult, err, _ := jwkGenFlightGroup.Do(set+alg, func() (any, error) {
 		r.Logger().WithField("jwks", set).Warnf("JSON Web Key not found in JSON Web Key Set %s, generating new key pair...", set)
