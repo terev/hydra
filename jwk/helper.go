@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	hydra "github.com/ory/hydra-client-go/v2"
+	"github.com/ory/hydra/v2/x"
 
 	"github.com/ory/x/josex"
 
@@ -47,9 +48,12 @@ func GetOrGenerateKeys(ctx context.Context, r InternalRegistry, m Manager, set, 
 
 func GetOrGenerateKeySet(ctx context.Context, r InternalRegistry, m Manager, set, kid, alg string) (*jose.JSONWebKeySet, error) {
 	keys, err := m.GetKeySet(ctx, set)
-	if err == nil && (keys != nil && len(keys.Keys) > 0) {
+	if err != nil && !errors.Is(err, x.ErrNotFound) {
+		return nil, err
+	} else if keys != nil && len(keys.Keys) > 0 {
 		return keys, nil
 	}
+
 	// Suppress duplicate key set generation jobs where the set+alg match.
 	keysResult, err, _ := jwkGenFlightGroup.Do(set+alg, func() (any, error) {
 		r.Logger().WithField("jwks", set).Warnf("JSON Web Key not found in JSON Web Key Set %s, generating new key pair...", set)
